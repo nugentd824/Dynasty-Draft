@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     ppr_type         TEXT,     -- standard | half_ppr | ppr | custom
     scoring_rec      REAL,
     keeper_share     REAL,
+    max_keepers      INTEGER,  -- league.settings.max_keepers; nonzero on 'redraft' leagues too
     pick_count       INTEGER,
     priced_picks     INTEGER,
     included         INTEGER,  -- 1 = contributes to aggregation
@@ -95,11 +96,26 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# Columns added after the first schema shipped. CREATE TABLE IF NOT EXISTS
+# will not add them to a database that already exists, so they go on by hand.
+MIGRATIONS = (
+    ("drafts", "max_keepers", "INTEGER"),
+)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, decl in MIGRATIONS:
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
 
 
@@ -163,17 +179,20 @@ def upsert_draft(conn: sqlite3.Connection, row: dict) -> None:
         """
         INSERT INTO drafts (draft_id, league_id, season, draft_type, status, budget, teams,
                             league_format, superflex, ppr_type, scoring_rec, keeper_share,
-                            pick_count, priced_picks, included, exclusion_reason, ingested_at)
+                            max_keepers, pick_count, priced_picks, included, exclusion_reason,
+                            ingested_at)
         VALUES (:draft_id, :league_id, :season, :draft_type, :status, :budget, :teams,
                 :league_format, :superflex, :ppr_type, :scoring_rec, :keeper_share,
-                :pick_count, :priced_picks, :included, :exclusion_reason, :ingested_at)
+                :max_keepers, :pick_count, :priced_picks, :included, :exclusion_reason,
+                :ingested_at)
         ON CONFLICT(draft_id) DO UPDATE SET
             league_id=excluded.league_id, season=excluded.season,
             draft_type=excluded.draft_type, status=excluded.status,
             budget=excluded.budget, teams=excluded.teams,
             league_format=excluded.league_format, superflex=excluded.superflex,
             ppr_type=excluded.ppr_type, scoring_rec=excluded.scoring_rec,
-            keeper_share=excluded.keeper_share, pick_count=excluded.pick_count,
+            keeper_share=excluded.keeper_share, max_keepers=excluded.max_keepers,
+            pick_count=excluded.pick_count,
             priced_picks=excluded.priced_picks, included=excluded.included,
             exclusion_reason=excluded.exclusion_reason, ingested_at=excluded.ingested_at
         """,

@@ -46,6 +46,7 @@ def list_segments(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(conn.execute(
         """
         SELECT d.season, d.league_format, d.superflex, d.ppr_type, d.teams,
+               MAX(COALESCE(d.max_keepers, 0)) AS max_keepers,
                COUNT(DISTINCT d.draft_id) AS n_drafts,
                COUNT(p.pick_no)           AS n_picks
         FROM drafts d LEFT JOIN picks p ON p.draft_id = d.draft_id
@@ -228,12 +229,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     conn = db.connect(cfg.db_path)
 
     if args.segments:
-        print(f"{'season':<8} {'format':<9} {'sf':<3} {'ppr':<10} {'teams':>5} {'drafts':>7} {'picks':>7}")
-        print("-" * 60)
+        print(f"{'season':<8} {'format':<9} {'sf':<3} {'ppr':<10} {'teams':>5} "
+              f"{'keep':>5} {'drafts':>7} {'picks':>7}")
+        print("-" * 68)
         for r in list_segments(conn):
             print(f"{r['season'] or '?':<8} {r['league_format'] or '?':<9} {r['superflex']:<3} "
                   f"{r['ppr_type'] or '?':<10} {str(r['teams'] or '?'):>5} "
-                  f"{r['n_drafts']:>7} {r['n_picks']:>7}")
+                  f"{r['max_keepers']:>5} {r['n_drafts']:>7} {r['n_picks']:>7}")
+        print("\n'keep' is the most keepers any league in the segment allows. Nonzero on a "
+              "\nredraft segment means some of those players never reached the block.")
         return 0
 
     if args.keeper_distribution:

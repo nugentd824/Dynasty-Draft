@@ -189,3 +189,47 @@ class DefaultSeasonTests(unittest.TestCase):
         import config
         self.assertEqual(config.default_season(), str(date.today().year))
         self.assertEqual(Config().season, str(date.today().year))
+
+
+class MaxKeepersTests(unittest.TestCase):
+    """A league typed redraft can still allow keepers — seen on real data."""
+
+    def test_redraft_league_with_a_keeper_allowance_is_visible(self):
+        league = fx.league(league_type=0)
+        league["settings"]["max_keepers"] = 1
+        conn = db.connect(":memory:")
+        client = fx.FakeClient(
+            drafts={"D1": fx.draft()},
+            picks={"D1": fx.auction_picks({"A": 50, "B": 10})},
+            leagues={"L1": league},
+        )
+        db.enqueue_draft(conn, "D1", "L1", "2025")
+        row = ingest.ingest_draft(conn, client, "D1", cfg())
+        self.assertEqual(row["league_format"], "redraft")
+        self.assertEqual(row["max_keepers"], 1)
+
+    def test_absent_max_keepers_is_none_not_zero(self):
+        self.assertIsNone(ingest.max_keepers(fx.league()))
+        self.assertIsNone(ingest.max_keepers(None))
+        self.assertEqual(ingest.max_keepers({"settings": {"max_keepers": "2"}}), 2)
+
+    def test_migration_adds_the_column_to_an_existing_database(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "old.sqlite3")
+            old = sqlite3.connect(path)
+            old.executescript(db.SCHEMA.replace(
+                "    max_keepers      INTEGER,  -- league.settings.max_keepers; "
+                "nonzero on 'redraft' leagues too\n", ""))
+            old.execute("INSERT INTO drafts (draft_id) VALUES ('D_OLD')")
+            old.commit()
+            old.close()
+
+            conn = db.connect(path)
+            columns = {r[1] for r in conn.execute("PRAGMA table_info(drafts)")}
+            self.assertIn("max_keepers", columns)
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM drafts WHERE draft_id='D_OLD'").fetchone()[0], 1)

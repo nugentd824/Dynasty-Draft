@@ -172,6 +172,22 @@ def classify_ppr(league: Optional[dict], draft: Optional[dict] = None) -> tuple[
     return "custom", rec
 
 
+def max_keepers(league: Optional[dict]) -> Optional[int]:
+    """How many players a team may keep, per the league's own settings.
+
+    Worth recording separately from `league_format`: leagues typed 0 (redraft)
+    routinely allow a keeper or two, and a market where a dozen players never
+    reach the block is not the same market as a true redraft. `league_format`
+    reports what Sleeper says; this reports what the rules actually allow, so
+    the two can disagree visibly instead of silently.
+    """
+    value = (league or {}).get("settings", {}).get("max_keepers")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def classify_teams(league: Optional[dict], draft: dict) -> Optional[int]:
     if league and league.get("total_rosters"):
         return int(league["total_rosters"])
@@ -284,6 +300,7 @@ def ingest_draft(
         "ppr_type": "unknown",
         "scoring_rec": None,
         "keeper_share": None,
+        "max_keepers": None,
         "pick_count": None,
         "priced_picks": 0,
         "included": 0,
@@ -311,6 +328,7 @@ def ingest_draft(
         "superflex": 1 if classify_superflex(league, draft) else 0,
         "ppr_type": ppr_type,
         "scoring_rec": scoring_rec,
+        "max_keepers": max_keepers(league),
     })
 
     picks = client.get_draft_picks(draft_id)
