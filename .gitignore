@@ -1,0 +1,19 @@
+# Secrets and runtime config — never commit
+.env
+.env.local
+
+# Local data
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+data/
+players_nfl.json
+*.cache.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/

@@ -1,0 +1,2 @@
+# Stdlib + requests only. See CLAUDE.md "Conventions" before adding anything here.
+requests>=2.31
