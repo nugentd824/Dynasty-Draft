@@ -15,8 +15,11 @@ carries the winning bid as a string, exactly as assumed, and `parse_amount()`
 needed no change.
 
 Draft objects, league objects and `/state/nfl` have all been checked against
-live responses too. What remains unproven is scale: no full crawl has run, so
-discovery yield and per-segment sample size are still unknown.
+live responses too, and the crawler has run against the live API end to end.
+
+Discovery yield is measured at roughly 7% of encountered drafts being completed
+auctions, at about a dozen requests per usable draft. Per-segment sample size at
+scale is still unknown.
 
 ## Setup
 

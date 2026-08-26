@@ -42,15 +42,17 @@ class CrawlTests(unittest.TestCase):
         self.assertNotIn("D2", queued)   # snake
         self.assertEqual(stats["drafts_found"], len(queued))
 
-    def test_expands_through_auction_leagues_only_by_default(self):
-        self.crawler(max_drafts=10).run()
+    def test_expands_through_every_league_by_default(self):
         # u3 is only reachable through L_AUCTION; u4 only through L_SNAKE.
+        # Both must be reached, or the frontier starves — measured on live data.
+        self.crawler(max_drafts=10).run()
+        self.assertIn("user/u3/drafts", self.client.calls)
+        self.assertIn("user/u4/drafts", self.client.calls)
+
+    def test_auction_leagues_only_narrows_the_walk(self):
+        self.crawler(max_drafts=10, expand_all_leagues=False).run()
         self.assertIn("user/u3/drafts", self.client.calls)
         self.assertNotIn("user/u4/drafts", self.client.calls)
-
-    def test_expand_all_leagues_widens_the_walk(self):
-        self.crawler(max_drafts=10, expand_all_leagues=True).run()
-        self.assertIn("user/u4/drafts", self.client.calls)
 
     def test_max_drafts_stops_the_crawl(self):
         stats = self.crawler(max_drafts=1).run()
@@ -74,7 +76,7 @@ class CrawlTests(unittest.TestCase):
         self.assertEqual(self.client.calls.count("user/u1/drafts"), first)
 
     def test_max_depth_bounds_the_walk(self):
-        self.crawler(max_drafts=10, max_depth=1).run()
+        self.crawler(max_drafts=10, max_depth=1, expand_all_leagues=False).run()
         self.assertIn("user/u1/drafts", self.client.calls)
         self.assertNotIn("user/u3/drafts", self.client.calls)
 

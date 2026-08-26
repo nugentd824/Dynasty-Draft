@@ -30,21 +30,26 @@ log = logging.getLogger("crawl")
 class Crawler:
     def __init__(self, conn: sqlite3.Connection, client: SleeperClient, cfg: Config,
                  max_drafts: int = 50, max_depth: int = 3, max_users: int = 2000,
-                 expand_all_leagues: bool = False) -> None:
+                 expand_all_leagues: bool = True) -> None:
         self.conn = conn
         self.client = client
         self.cfg = cfg
         self.max_drafts = max_drafts
         self.max_depth = max_depth
         self.max_users = max_users
-        # By default the graph is only expanded through leagues that actually
-        # ran an auction — auction players cluster together, and following
-        # every snake league burns the request budget for nothing.
+        # Expand through every league, not just the ones that ran auctions.
+        # Restricting to auction leagues looks like a saving and is not: measured
+        # against a live seed, auction-only reached 2 leagues and 1 usable draft
+        # from 21 users, while following every league reached 70 leagues and 11
+        # usable drafts from 60. Most people's other leagues are snake, so the
+        # frontier dies almost immediately without them.
         self.expand_all_leagues = expand_all_leagues
 
         self.drafts_found = 0
         self.users_visited = 0
-        self.auction_leagues = 0
+        self.leagues_expanded = 0
+        self.drafts_seen = 0
+        self.auction_pending = 0
         self._queue: deque[tuple[str, int]] = deque()   # (user_id, depth), in memory only
         self._queued_ids: set[str] = set()
 
@@ -98,6 +103,7 @@ class Crawler:
         fresh = db.mark_league_seen(self.conn, league_id, self.cfg.season)
         if not fresh and not force:
             return 0
+        self.leagues_expanded += 1
         members = 0
         for member in self.client.get_league_users(league_id):
             user_id = member.get("user_id")
@@ -122,8 +128,13 @@ class Crawler:
             draft_id = draft.get("draft_id")
             if not draft_id:
                 continue
+            self.drafts_seen += 1
             is_auction = draft.get("type") == "auction"
             complete = draft.get("status") == "complete"
+            if is_auction and not complete:
+                # Drafts still to come. Worth counting in preseason: they are
+                # tomorrow's data, and they explain a thin sample today.
+                self.auction_pending += 1
 
             if is_auction and complete and league_id:
                 if db.enqueue_draft(self.conn, str(draft_id), str(league_id), self.cfg.season):
@@ -134,8 +145,6 @@ class Crawler:
                 log.debug("skip mock auction %s (no league_id)", draft_id)
 
             if league_id and (self.expand_all_leagues or is_auction):
-                if is_auction:
-                    self.auction_leagues += 1
                 self._expand_league(str(league_id), depth)
 
     # -- driver ------------------------------------------------------------
@@ -152,11 +161,15 @@ class Crawler:
         stop = ("max_drafts reached" if self.drafts_found >= self.max_drafts
                 else "max_users reached" if self.users_visited >= self.max_users
                 else "frontier exhausted")
+        found = self.drafts_found
         return {
-            "drafts_found": self.drafts_found,
+            "drafts_found": found,
             "users_visited": self.users_visited,
-            "auction_leagues": self.auction_leagues,
+            "leagues_expanded": self.leagues_expanded,
+            "drafts_seen": self.drafts_seen,
+            "auctions_not_yet_drafted": self.auction_pending,
             "requests": self.client.request_count,
+            "requests_per_draft": round(self.client.request_count / found, 1) if found else None,
             "frontier_remaining": len(self._queue),
             "stopped_because": stop,
         }
@@ -168,8 +181,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--max-depth", type=int, default=3, help="how far out through the social graph to walk")
     ap.add_argument("--max-users", type=int, default=2000, help="hard cap on users visited")
     ap.add_argument("--season", help="override SLEEPER_SEASON; 'auto' asks /state/nfl")
-    ap.add_argument("--expand-all-leagues", action="store_true",
-                    help="follow snake leagues too (wider, much more expensive)")
+    ap.add_argument("--auction-leagues-only", action="store_true",
+                    help="only follow leagues that ran an auction; starves the "
+                         "frontier fast, measured far worse than the default")
     ap.add_argument("--verbose", "-v", action="store_true")
     args = ap.parse_args(argv)
 
@@ -195,7 +209,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         max_drafts=args.max_drafts,
         max_depth=args.max_depth,
         max_users=args.max_users,
-        expand_all_leagues=args.expand_all_leagues,
+        expand_all_leagues=not args.auction_leagues_only,
     )
 
     log.info("crawling season %s at %d req/min", cfg.season, cfg.rate_limit_per_min)

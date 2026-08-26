@@ -62,6 +62,16 @@ toward an identical average and hides real separation between them.
   correctly named.
 - **`/v1/state/nfl`** answers with the live season, and takes no parameters, so
   it doubles as a reachability check.
+- **Expand the crawl through every league, not only auction ones.** Measured
+  from a live seed: following only auction leagues reached 2 leagues and 1
+  usable draft from 21 users; following every league reached 70 leagues and 11
+  usable drafts from 60. Most people's other leagues are snake, so restricting
+  the walk starves the frontier within one hop. `--auction-leagues-only` still
+  exists, and is worse.
+- **Roughly 7% of drafts in the graph are completed auctions** (11 of 157 near
+  the seed, in preseason). Auctions are ~15% of all drafts and about half of
+  those had not drafted yet, so the ratio should improve once the season
+  starts.
 
 ## Unverified — check before trusting at scale
 
