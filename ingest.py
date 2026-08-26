@@ -263,6 +263,13 @@ def normalize_picks(picks: list[dict], budget: int, keeper_threshold: float) -> 
             "is_keeper": False,
         })
 
+    if not considered:
+        # Complete, but the API returned nothing. Seen in the wild on drafts
+        # that were set up and then abandoned. Distinct from a parse failure,
+        # and must stay distinct: conflating them raises a false alarm about
+        # parse_amount() on data that never had a price in it.
+        raise Rejected("draft returned no picks", keeper_share=0.0)
+
     keeper_share = (keepers / considered) if considered else 0.0
     if keeper_share > keeper_threshold:
         raise Rejected(
@@ -270,8 +277,10 @@ def normalize_picks(picks: list[dict], budget: int, keeper_threshold: float) -> 
             keeper_share=keeper_share,
         )
     if not rows:
-        raise Rejected("no priced picks — check parse_amount() against a raw pick",
-                       keeper_share=keeper_share)
+        # Picks exist but none carried a bid. This one really is a parser alarm.
+        raise Rejected(
+            f"{considered} pick(s) but none priced — check parse_amount() against a raw pick",
+            keeper_share=keeper_share)
     return rows, keeper_share
 
 

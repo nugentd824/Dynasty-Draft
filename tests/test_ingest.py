@@ -270,3 +270,21 @@ class RealPickTests(unittest.TestCase):
         self.assertEqual(rows[0]["amount"], 64)
         self.assertAlmostEqual(rows[0]["pct_of_budget"], 32.0)
         self.assertEqual(keeper_share, 0.0)
+
+
+class EmptyDraftTests(unittest.TestCase):
+    """A complete draft with no picks is not a parser failure, and saying so
+    would send someone hunting for a bug that isn't there."""
+
+    def test_no_picks_at_all_is_reported_as_empty(self):
+        with self.assertRaises(ingest.Rejected) as ctx:
+            ingest.normalize_picks([], 200, 0.40)
+        self.assertEqual(ctx.exception.reason, "draft returned no picks")
+        self.assertNotIn("parse_amount", ctx.exception.reason)
+
+    def test_picks_present_but_unpriced_still_blames_the_parser(self):
+        picks = [fx.pick(1, "A", amount=None), fx.pick(2, "B", amount=None)]
+        with self.assertRaises(ingest.Rejected) as ctx:
+            ingest.normalize_picks(picks, 200, 0.40)
+        self.assertIn("parse_amount", ctx.exception.reason)
+        self.assertIn("2 pick(s)", ctx.exception.reason)
