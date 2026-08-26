@@ -9,15 +9,14 @@ it, and the decisions that shouldn't be relitigated.
 
 ## Status
 
-The pipeline is complete and tested end to end against synthetic drafts. It has
-**never made a live API call**, so one assumption is still open:
+The pipeline is complete and tested end to end. The bid field was confirmed on
+2026-08-26 against a completed 12-team half-PPR auction — `metadata.amount`
+carries the winning bid as a string, exactly as assumed, and `parse_amount()`
+needed no change.
 
-> `metadata.amount` on auction picks is undocumented. Sleeper's published docs
-> only show a snake draft, where the field never appears. **Run `verify.py`
-> against one real auction draft before scaling a crawl up.**
-
-`parse_amount()` in `ingest.py` is the only place that needs changing if the
-field is shaped differently.
+Draft objects, league objects and `/state/nfl` have all been checked against
+live responses too. What remains unproven is scale: no full crawl has run, so
+discovery yield and per-segment sample size are still unknown.
 
 ## Setup
 

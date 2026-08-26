@@ -48,14 +48,23 @@ part — a tight band means consensus, a wide one is where the edge is.
 Late auctions collapse into everyone-costs-a-dollar, which drags fringe players
 toward an identical average and hides real separation between them.
 
+## Confirmed against live data (2026-08-26)
+
+- **`metadata.amount` is real, and it is a string.** Checked against a
+  completed 12-team half-PPR auction: `"amount": "64"` sits in `metadata`
+  alongside the player fields, with `is_keeper: null` on ordinary picks.
+  `parse_amount()` needed no change. Still undocumented, so it can change
+  without notice — `python3 verify.py --draft-id <id>` re-checks it in one
+  command.
+- **Draft and league objects match what ingest reads.** `settings.budget`,
+  `settings.teams`, `metadata.scoring_type`, `settings.type`,
+  `scoring_settings.rec`, `roster_positions`, `total_rosters` all present and
+  correctly named.
+- **`/v1/state/nfl`** answers with the live season, and takes no parameters, so
+  it doubles as a reachability check.
+
 ## Unverified — check before trusting at scale
 
-- **`metadata.amount` on auction picks is undocumented.** Sleeper's official
-  docs only show a snake draft example, so the field never appears there. It's
-  almost certainly correct but has never been confirmed against a live response.
-  Verify the field name and type against one real auction draft before running a
-  large crawl. `parse_amount()` in `ingest.py` is the only place that needs
-  changing if it's shaped differently.
 - **The 40% keeper threshold is a guess.** Look at the real distribution once
   there's data and move it.
 - **Mock detection via missing `league_id` is a heuristic**, not a documented

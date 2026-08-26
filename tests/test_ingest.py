@@ -233,3 +233,40 @@ class MaxKeepersTests(unittest.TestCase):
             self.assertIn("max_keepers", columns)
             self.assertEqual(
                 conn.execute("SELECT COUNT(*) FROM drafts WHERE draft_id='D_OLD'").fetchone()[0], 1)
+
+
+class RealPickTests(unittest.TestCase):
+    """The live pick that settled the metadata.amount question.
+
+    Captured 2026-08-26 from a completed 12-team half-PPR auction.
+    `picked_by` and `draft_id` are redacted — they identify a person and a
+    league, and neither is needed to price anything.
+    """
+
+    REAL_PICK = {
+        "draft_id": "<redacted>", "draft_slot": 2, "is_keeper": None,
+        "metadata": {
+            "amount": "64", "first_name": "Ja'Marr", "last_name": "Chase",
+            "player_id": "7564", "position": "WR", "team": "CIN", "slot": "1",
+            "status": "Active", "injury_status": "", "number": "1",
+            "news_updated": "1755575435724", "years_exp": "4", "sport": "nfl",
+            "team_abbr": "", "team_changed_at": "",
+        },
+        "pick_no": 2, "picked_by": "<redacted>", "player_id": "7564",
+        "reactions": None, "roster_id": 6, "round": 1,
+    }
+
+    def test_the_bid_is_a_string_under_metadata_amount(self):
+        self.assertIsInstance(self.REAL_PICK["metadata"]["amount"], str)
+        self.assertEqual(ingest.found_amount_key(self.REAL_PICK), ("metadata", "amount"))
+        self.assertEqual(ingest.parse_amount(self.REAL_PICK), 64)
+
+    def test_ordinary_picks_carry_is_keeper_null(self):
+        self.assertIsNone(self.REAL_PICK["is_keeper"])
+        self.assertFalse(ingest.is_keeper(self.REAL_PICK))
+
+    def test_it_normalizes(self):
+        rows, keeper_share = ingest.normalize_picks([self.REAL_PICK], 200, 0.40)
+        self.assertEqual(rows[0]["amount"], 64)
+        self.assertAlmostEqual(rows[0]["pct_of_budget"], 32.0)
+        self.assertEqual(keeper_share, 0.0)
