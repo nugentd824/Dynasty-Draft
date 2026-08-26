@@ -169,6 +169,20 @@ def mark_league_seen(conn: sqlite3.Connection, league_id: str, season: str) -> b
     return cur.rowcount > 0
 
 
+def reset_frontier(conn: sqlite3.Connection, season: str) -> dict:
+    """Forget which users and leagues have been walked, for one season.
+
+    Needed to crawl deeper than a previous run. User IDs are never stored — only
+    hashes — so the frontier lives solely in memory during a run and cannot be
+    resumed outward afterwards. Clearing the bookkeeping lets a fresh, deeper
+    walk proceed; drafts and picks are untouched, and re-ingest is idempotent.
+    """
+    users = conn.execute("DELETE FROM seen_users WHERE season = ?", (season,)).rowcount
+    leagues = conn.execute("DELETE FROM seen_leagues WHERE season = ?", (season,)).rowcount
+    conn.commit()
+    return {"users_cleared": users, "leagues_cleared": leagues}
+
+
 def enqueue_draft(conn: sqlite3.Connection, draft_id: str, league_id: str, season: str) -> bool:
     cur = conn.execute(
         "INSERT OR IGNORE INTO draft_queue (draft_id, league_id, season, state, discovered_at) "

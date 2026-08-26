@@ -149,3 +149,26 @@ class MultiSeasonTests(unittest.TestCase):
             self.assertEqual(pk, ["user_hash", "season"])
             self.assertTrue(db.user_seen(conn, "abc", "2026"))
             self.assertFalse(db.user_seen(conn, "abc", "2025"))
+
+
+class ResetFrontierTests(unittest.TestCase):
+    def test_reset_lets_a_deeper_crawl_walk_again(self):
+        conn = db.connect(":memory:")
+        client = fx.FakeClient(
+            league_users={"SEED_LEAGUE": members("u1")},
+            user_drafts={"u1": [fx.draft("D1", "L1")]},
+        )
+        crawl.Crawler(conn, client, CFG, max_drafts=10).run()
+        crawl.Crawler(conn, client, CFG, max_drafts=10).run()
+        self.assertEqual(client.calls.count("user/u1/drafts"), 1)
+
+        cleared = db.reset_frontier(conn, "2025")
+        self.assertGreater(cleared["users_cleared"], 0)
+        crawl.Crawler(conn, client, CFG, max_drafts=10).run()
+        self.assertEqual(client.calls.count("user/u1/drafts"), 2)
+
+    def test_reset_keeps_drafts_and_picks(self):
+        conn = db.connect(":memory:")
+        db.enqueue_draft(conn, "D1", "L1", "2025")
+        db.reset_frontier(conn, "2025")
+        self.assertEqual(len(db.pending_drafts(conn, "2025")), 1)

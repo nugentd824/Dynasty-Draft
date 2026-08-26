@@ -184,6 +184,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--auction-leagues-only", action="store_true",
                     help="only follow leagues that ran an auction; starves the "
                          "frontier fast, measured far worse than the default")
+    ap.add_argument("--reset-frontier", action="store_true",
+                    help="forget which users/leagues were walked for this season, so a "
+                         "deeper run can proceed; keeps drafts and picks")
     ap.add_argument("--verbose", "-v", action="store_true")
     args = ap.parse_args(argv)
 
@@ -211,6 +214,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         max_users=args.max_users,
         expand_all_leagues=not args.auction_leagues_only,
     )
+
+    if args.reset_frontier:
+        cleared = db.reset_frontier(conn, cfg.season)
+        log.info("frontier reset for %s: %s", cfg.season, cleared)
 
     log.info("crawling season %s at %d req/min", cfg.season, cfg.rate_limit_per_min)
     stats = crawler.run()
