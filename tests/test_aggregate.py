@@ -185,9 +185,14 @@ class PoolingTests(unittest.TestCase):
     def test_segment_listing_can_pool_reception_scoring(self):
         split = aggregate.list_segments(self.conn)
         pooled = aggregate.list_segments(self.conn, pool_ppr=True)
+        self.assertEqual(len(split), 2)
         self.assertEqual({r["ppr_type"] for r in split}, {"half_ppr", "ppr"})
-        self.assertEqual({r["ppr_type"] for r in pooled}, {aggregate.POOLED_PPR_LABEL})
-        self.assertEqual(sum(r["n_drafts"] for r in pooled), 4)
+        # One row, not two rows wearing the same label: the counts must actually
+        # merge, or the pooling is cosmetic.
+        self.assertEqual(len(pooled), 1)
+        self.assertEqual(pooled[0]["ppr_type"], aggregate.POOLED_PPR_LABEL)
+        self.assertEqual(pooled[0]["n_drafts"], 4)
+        self.assertEqual(pooled[0]["n_picks"], sum(r["n_picks"] for r in split))
 
     def test_standard_scoring_is_not_pooled_in(self):
         # Standard is a different market for anyone who catches the ball.

@@ -62,6 +62,10 @@ def list_segments(conn: sqlite3.Connection, pool_ppr: bool = False) -> list[sqli
     the same — `compare_dimension` is what answers that.
     """
     ppr_expr = _PPR_EXPR if pool_ppr else "d.ppr_type"
+    # GROUP BY repeats the expression rather than referencing the alias: the
+    # alias `ppr_type` collides with the table's own column, and SQLite binds
+    # the column, which groups by the unpooled value while displaying the
+    # pooled label — one segment rendered as two rows with split counts.
     return list(conn.execute(
         f"""
         SELECT d.season, d.league_format, d.superflex, {ppr_expr} AS ppr_type, d.teams,
@@ -70,7 +74,7 @@ def list_segments(conn: sqlite3.Connection, pool_ppr: bool = False) -> list[sqli
                COUNT(p.pick_no)           AS n_picks
         FROM drafts d LEFT JOIN picks p ON p.draft_id = d.draft_id
         WHERE d.included = 1
-        GROUP BY d.season, d.league_format, d.superflex, ppr_type, d.teams
+        GROUP BY d.season, d.league_format, d.superflex, {ppr_expr}, d.teams
         ORDER BY n_drafts DESC
         """
     ))
