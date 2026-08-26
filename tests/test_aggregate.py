@@ -120,3 +120,64 @@ class SegmentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PoolingTests(unittest.TestCase):
+    """Pooling segments is available but never implicit, and comes with a way
+    to check whether the segments being pooled actually agree."""
+
+    def setUp(self):
+        self.conn = db.connect(":memory:")
+        # Same player, systematically dearer in full PPR than half.
+        specs = [
+            ("D1", "L_HALF", 0.5, {"wr": 40, "qb": 20}),
+            ("D2", "L_HALF", 0.5, {"wr": 44, "qb": 20}),
+            ("D3", "L_PPR", 1.0, {"wr": 60, "qb": 21}),
+            ("D4", "L_PPR", 1.0, {"wr": 64, "qb": 19}),
+        ]
+        client = fx.FakeClient(
+            drafts={d: fx.draft(d, lg, budget=200) for d, lg, _, _ in specs},
+            picks={d: fx.auction_picks(p, draft_id=d) for d, _, _, p in specs},
+            leagues={"L_HALF": fx.league("L_HALF", rec=0.5),
+                     "L_PPR": fx.league("L_PPR", rec=1.0)},
+        )
+        for draft_id, league_id, _, _ in specs:
+            db.enqueue_draft(self.conn, draft_id, league_id, "2025")
+        ingest.ingest_pending(self.conn, client, CFG)
+
+    def test_a_list_pools_the_values(self):
+        half = aggregate.aggregate(self.conn, ppr="half_ppr", min_samples=1)
+        both = aggregate.aggregate(self.conn, ppr=["half_ppr", "ppr"], min_samples=1)
+        self.assertEqual({r["player_id"]: r["n_picks"] for r in half}["wr"], 2)
+        self.assertEqual({r["player_id"]: r["n_picks"] for r in both}["wr"], 4)
+
+    def test_pooling_hides_a_real_difference(self):
+        half = {r["player_id"]: r for r in aggregate.aggregate(self.conn, ppr="half_ppr", min_samples=1)}
+        full = {r["player_id"]: r for r in aggregate.aggregate(self.conn, ppr="ppr", min_samples=1)}
+        both = {r["player_id"]: r for r in aggregate.aggregate(self.conn, ppr=["half_ppr", "ppr"], min_samples=1)}
+        self.assertAlmostEqual(half["wr"]["mean_pct"], 21.0)
+        self.assertAlmostEqual(full["wr"]["mean_pct"], 31.0)
+        # The pooled mean matches neither market.
+        self.assertAlmostEqual(both["wr"]["mean_pct"], 26.0)
+
+    def test_comparison_surfaces_the_divergent_player(self):
+        result = aggregate.compare_dimension(
+            self.conn, "ppr", ["half_ppr", "ppr"], min_samples=1, season="2025")
+        self.assertEqual(result["shared_players"], 2)
+        biggest = result["rows"][0]
+        self.assertEqual(biggest["player_id"], "wr")
+        self.assertAlmostEqual(biggest["delta_pct"], 10.0)
+        # The QB barely moves between scoring types, as expected.
+        qb = next(r for r in result["rows"] if r["player_id"] == "qb")
+        self.assertLess(abs(qb["delta_pct"]), 1.0)
+
+    def test_comparison_reports_no_overlap_honestly(self):
+        result = aggregate.compare_dimension(
+            self.conn, "ppr", ["half_ppr", "standard"], min_samples=1, season="2025")
+        self.assertEqual(result["shared_players"], 0)
+        self.assertIn("Pooling would be a guess", aggregate.format_comparison(result, {}))
+
+    def test_empty_filter_list_is_ignored(self):
+        where, params = aggregate._segment_where(ppr=[])
+        self.assertNotIn("ppr_type", where)
+        self.assertEqual(params, [])

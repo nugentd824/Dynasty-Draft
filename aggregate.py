@@ -58,16 +58,67 @@ def list_segments(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def _segment_where(season=None, league_format=None, superflex=None, ppr=None, teams=None):
+    """Build the WHERE clause for a segment.
+
+    Any filter may be a list, which pools those values into one result set.
+    Pooling is never implicit: the caller has to ask for it, and the caller is
+    responsible for labelling the output as pooled. See `compare_dimension`
+    for checking whether the values being pooled actually agree.
+    """
     clauses = ["d.included = 1"]
     params: list = []
     for column, value in (
         ("d.season", season), ("d.league_format", league_format),
         ("d.superflex", superflex), ("d.ppr_type", ppr), ("d.teams", teams),
     ):
-        if value is not None:
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple, set)):
+            values = list(value)
+            if not values:
+                continue
+            clauses.append(f"{column} IN ({','.join('?' * len(values))})")
+            params.extend(values)
+        else:
             clauses.append(f"{column} = ?")
             params.append(value)
     return " AND ".join(clauses), params
+
+
+def compare_dimension(conn, dimension, values, min_samples=3, **filters):
+    """Do two segments actually agree on price? Per-player, where both have data.
+
+    Pooling segments is only harmless if the segments being pooled price players
+    the same way. This measures that instead of assuming it: for each player
+    with `min_samples` picks in both, the gap between the two means, in points
+    of budget, and as a share of the wider segment's own p25-p75 spread. A gap
+    small against that spread is noise; a gap comparable to it is a real
+    difference the pooled number would hide.
+    """
+    sides = {}
+    for value in values:
+        rows = aggregate(conn, min_samples=min_samples, **{**filters, dimension: value})
+        sides[value] = {r["player_id"]: r for r in rows}
+
+    left, right = values[0], values[1]
+    shared = sorted(set(sides[left]) & set(sides[right]))
+    out = []
+    for player_id in shared:
+        a_, b_ = sides[left][player_id], sides[right][player_id]
+        spread = max(a_["p75_pct"] - a_["p25_pct"], b_["p75_pct"] - b_["p25_pct"])
+        delta = b_["mean_pct"] - a_["mean_pct"]
+        out.append({
+            "player_id": player_id,
+            f"{left}_mean": a_["mean_pct"], f"{right}_mean": b_["mean_pct"],
+            f"{left}_n": a_["n_picks"], f"{right}_n": b_["n_picks"],
+            "delta_pct": delta,
+            "delta_vs_spread": (abs(delta) / spread) if spread > 0 else None,
+        })
+    out.sort(key=lambda r: abs(r["delta_pct"]), reverse=True)
+    return {"left": left, "right": right, "shared_players": len(shared),
+            "left_only": len(set(sides[left]) - set(sides[right])),
+            "right_only": len(set(sides[right]) - set(sides[left])),
+            "rows": out}
 
 
 def aggregate(conn: sqlite3.Connection, season=None, league_format=None, superflex=None,
@@ -182,6 +233,44 @@ def format_table(rows: list[dict], names: dict, reference_budget: int, limit: in
     return "\n".join(lines)
 
 
+def format_comparison(result, names, limit=30) -> str:
+    left, right = result["left"], result["right"]
+    lines = [
+        f"{left} vs {right}: {result['shared_players']} players with enough sample in both "
+        f"({result['left_only']} only in {left}, {result['right_only']} only in {right})",
+        "",
+    ]
+    if not result["rows"]:
+        lines.append("Not enough overlap to compare. Pooling would be a guess.")
+        return "\n".join(lines)
+
+    header = (f"{'player':<26} {left[:9]:>9} {right[:9]:>9} {'delta':>8} {'vs spread':>10}")
+    lines += [header, "-" * len(header)]
+    for r in result["rows"][:limit]:
+        ratio = r["delta_vs_spread"]
+        lines.append(
+            f"{names.get(r['player_id'], r['player_id'])[:26]:<26} "
+            f"{r[f'{left}_mean']:>8.2f}% {r[f'{right}_mean']:>8.2f}% "
+            f"{r['delta_pct']:>+7.2f}% {(f'{ratio:.2f}x' if ratio is not None else '-'):>10}"
+        )
+
+    deltas = [abs(r["delta_pct"]) for r in result["rows"]]
+    ratios = [r["delta_vs_spread"] for r in result["rows"] if r["delta_vs_spread"] is not None]
+    lines += ["", f"median absolute gap: {percentile(sorted(deltas), 0.5):.2f} points of budget"]
+    if ratios:
+        median_ratio = percentile(sorted(ratios), 0.5)
+        lines.append(f"median gap as a share of the within-segment spread: {median_ratio:.2f}x")
+        lines.append("")
+        if median_ratio < 0.35:
+            lines.append("Small against the noise these segments already carry. Pooling costs "
+                         "little, though check the biggest movers above — they will be the "
+                         "pass-catchers.")
+        else:
+            lines.append("Comparable to or larger than the within-segment spread. These are "
+                         "different markets; a pooled average would describe neither.")
+    return "\n".join(lines)
+
+
 def keeper_distribution(conn: sqlite3.Connection) -> str:
     """Keeper share per draft, bucketed. The 40% cutoff is a guess; this is
     what you look at to replace it with a number from the data."""
@@ -216,8 +305,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--season")
     ap.add_argument("--format", dest="league_format", choices=["redraft", "keeper", "dynasty", "unknown"])
     ap.add_argument("--superflex", type=int, choices=[0, 1])
-    ap.add_argument("--ppr", choices=["standard", "half_ppr", "ppr", "custom", "unknown"])
-    ap.add_argument("--teams", type=int)
+    ap.add_argument("--ppr", help="one scoring type, or several comma-separated to POOL "
+                                 "them (e.g. half_ppr,ppr). Pooling is labelled in the output")
+    ap.add_argument("--teams", help="team count, or several comma-separated to pool")
+    ap.add_argument("--compare-ppr", metavar="A,B",
+                    help="check whether two scoring types price players the same, "
+                         "before deciding to pool them (e.g. half_ppr,ppr)")
     ap.add_argument("--min-samples", type=int, default=3, help="drop players seen in fewer drafts")
     ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--budget", type=int, help="reference budget for display (default REFERENCE_BUDGET)")
@@ -245,8 +338,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     season = args.season or cfg.season
-    rows = aggregate(conn, season, args.league_format, args.superflex, args.ppr,
-                     args.teams, min_samples=args.min_samples)
+    ppr = args.ppr.split(",") if args.ppr else None
+    teams = [int(t) for t in args.teams.split(",")] if args.teams else None
+    if ppr and len(ppr) == 1:
+        ppr = ppr[0]
+    if teams and len(teams) == 1:
+        teams = teams[0]
+
+    if args.compare_ppr:
+        pair = args.compare_ppr.split(",")
+        if len(pair) != 2:
+            print("--compare-ppr takes exactly two scoring types, e.g. half_ppr,ppr")
+            return 1
+        result = compare_dimension(
+            conn, "ppr", pair, min_samples=args.min_samples, season=season,
+            league_format=args.league_format, superflex=args.superflex, teams=teams)
+        print(format_comparison(result, player_names(cfg, offline=args.offline), args.limit))
+        return 0
+
+    rows = aggregate(conn, season, args.league_format, args.superflex, ppr,
+                     teams, min_samples=args.min_samples)
 
     if args.materialize:
         n = materialize(conn, rows, season, args.league_format, args.superflex, args.ppr, args.teams)
@@ -254,10 +365,16 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     names = player_names(cfg, offline=args.offline)
     budget = args.budget or cfg.reference_budget
+    pooled = [n for n, v in (("ppr", ppr), ("teams", teams))
+              if isinstance(v, list) and len(v) > 1]
     seg = (f"season={season} format={args.league_format or 'any'} "
            f"superflex={args.superflex if args.superflex is not None else 'any'} "
            f"ppr={args.ppr or 'any'} teams={args.teams or 'any'}")
-    print(f"segment: {seg}   players: {len(rows)}\n")
+    print(f"segment: {seg}   players: {len(rows)}")
+    if pooled:
+        print(f"POOLED across {', '.join(pooled)} — these are not one real league's prices. "
+              f"Check --compare-ppr before trusting them.")
+    print()
     print(format_table(rows, names, budget, args.limit))
     return 0
 
