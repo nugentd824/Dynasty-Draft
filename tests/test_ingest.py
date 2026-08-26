@@ -180,3 +180,12 @@ class KeeperDistributionTests(unittest.TestCase):
         self.assertAlmostEqual(row["keeper_share"], 0.75)
         stored = conn.execute("SELECT keeper_share FROM drafts WHERE draft_id='D1'").fetchone()[0]
         self.assertAlmostEqual(stored, 0.75)
+
+
+class DefaultSeasonTests(unittest.TestCase):
+    def test_default_season_is_the_current_year_not_a_stale_literal(self):
+        from datetime import date
+
+        import config
+        self.assertEqual(config.default_season(), str(date.today().year))
+        self.assertEqual(Config().season, str(date.today().year))

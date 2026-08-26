@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 ENV_FILE = Path(__file__).with_name(".env")
@@ -34,6 +35,17 @@ def load_env(path: Path = ENV_FILE) -> None:
             os.environ[key] = value
 
 
+def default_season() -> str:
+    """The NFL season year to crawl, when nothing says otherwise.
+
+    A season is named for the calendar year it starts in, and drafts run
+    August-September, so the current year is right for most of the year. In
+    January and February the season that just ended is the previous year — set
+    SLEEPER_SEASON explicitly then. /v1/state/nfl is authoritative if in doubt.
+    """
+    return str(date.today().year)
+
+
 def _int(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name) or default)
@@ -52,7 +64,7 @@ def _float(name: str, default: float) -> float:
 class Config:
     seed_league_id: str = ""
     seed_username: str = ""
-    season: str = "2025"
+    season: str = field(default_factory=default_season)
     user_id_salt: str = ""
     rate_limit_per_min: int = 300
     db_path: str = "sleeper_aav.sqlite3"
@@ -67,7 +79,7 @@ class Config:
         return cls(
             seed_league_id=os.environ.get("SLEEPER_SEED_LEAGUE_ID", "").strip(),
             seed_username=os.environ.get("SLEEPER_SEED_USERNAME", "").strip(),
-            season=os.environ.get("SLEEPER_SEASON", "2025").strip(),
+            season=(os.environ.get("SLEEPER_SEASON") or default_season()).strip(),
             user_id_salt=os.environ.get("SLEEPER_USER_ID_SALT", "").strip(),
             rate_limit_per_min=_int("SLEEPER_RATE_LIMIT_PER_MIN", 300),
             db_path=os.environ.get("SLEEPER_DB_PATH", "sleeper_aav.sqlite3").strip(),
