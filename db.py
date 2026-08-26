@@ -50,10 +50,13 @@ CREATE INDEX IF NOT EXISTS idx_picks_player ON picks(player_id);
 -- Crawl bookkeeping. Deliberately holds hashes, not IDs: a visited user is a
 -- fact we need for dedupe, but who they are is not.
 CREATE TABLE IF NOT EXISTS seen_users (
-    user_hash    TEXT PRIMARY KEY,
-    season       TEXT,
+    user_hash    TEXT NOT NULL,
+    season       TEXT NOT NULL,
     depth        INTEGER,
-    discovered_at TEXT
+    discovered_at TEXT,
+    -- Keyed by season as well as hash: the same person has different drafts
+    -- each year, so a 2025 crawl must revisit everyone a 2026 crawl saw.
+    PRIMARY KEY (user_hash, season)
 );
 
 CREATE TABLE IF NOT EXISTS seen_leagues (
@@ -109,6 +112,25 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
+    # seen_users was keyed on user_hash alone, which made a second season's
+    # crawl skip everyone the first had visited. Rebuild it with (hash, season).
+    pk = [r[1] for r in conn.execute("PRAGMA table_info(seen_users)") if r[5]]
+    if pk == ["user_hash"]:
+        conn.executescript("""
+            ALTER TABLE seen_users RENAME TO seen_users_old;
+            CREATE TABLE seen_users (
+                user_hash    TEXT NOT NULL,
+                season       TEXT NOT NULL,
+                depth        INTEGER,
+                discovered_at TEXT,
+                PRIMARY KEY (user_hash, season)
+            );
+            INSERT OR IGNORE INTO seen_users (user_hash, season, depth, discovered_at)
+                SELECT user_hash, COALESCE(season, ''), depth, discovered_at
+                FROM seen_users_old;
+            DROP TABLE seen_users_old;
+        """)
+
 
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
@@ -131,8 +153,11 @@ def mark_user_seen(conn: sqlite3.Connection, user_hash: str, season: str, depth:
     return cur.rowcount > 0
 
 
-def user_seen(conn: sqlite3.Connection, user_hash: str) -> bool:
-    row = conn.execute("SELECT 1 FROM seen_users WHERE user_hash = ?", (user_hash,)).fetchone()
+def user_seen(conn: sqlite3.Connection, user_hash: str, season: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM seen_users WHERE user_hash = ? AND season = ?",
+        (user_hash, season),
+    ).fetchone()
     return row is not None
 
 

@@ -91,7 +91,7 @@ class Crawler:
     def _enqueue_user(self, user_id: str, depth: int) -> None:
         if depth > self.max_depth or user_id in self._queued_ids:
             return
-        if db.user_seen(self.conn, self.cfg.hash_user_id(user_id)):
+        if db.user_seen(self.conn, self.cfg.hash_user_id(user_id), self.cfg.season):
             return
         self._queued_ids.add(user_id)
         self._queue.append((user_id, depth))

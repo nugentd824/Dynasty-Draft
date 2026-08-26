@@ -100,3 +100,52 @@ class CrawlTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiSeasonTests(unittest.TestCase):
+    """A user visited for one season must be revisited for another — their
+    drafts are different each year."""
+
+    def setUp(self):
+        self.conn = db.connect(":memory:")
+        self.client = fx.FakeClient(
+            league_users={"SEED_LEAGUE": members("u1")},
+            user_drafts={"u1": [fx.draft("D_2026", "L1", season="2026")]},
+        )
+
+    def _cfg(self, season):
+        return Config(db_path=":memory:", season=season, user_id_salt="test-salt",
+                      seed_league_id="SEED_LEAGUE")
+
+    def test_a_second_season_revisits_the_same_users(self):
+        crawl.Crawler(self.conn, self.client, self._cfg("2026"), max_drafts=10).run()
+        self.assertEqual(self.client.calls.count("user/u1/drafts"), 1)
+        crawl.Crawler(self.conn, self.client, self._cfg("2025"), max_drafts=10).run()
+        self.assertEqual(self.client.calls.count("user/u1/drafts"), 2)
+
+    def test_the_same_season_still_dedupes(self):
+        crawl.Crawler(self.conn, self.client, self._cfg("2026"), max_drafts=10).run()
+        crawl.Crawler(self.conn, self.client, self._cfg("2026"), max_drafts=10).run()
+        self.assertEqual(self.client.calls.count("user/u1/drafts"), 1)
+
+    def test_migration_rekeys_an_existing_database(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "old.sqlite3")
+            old = sqlite3.connect(path)
+            old.executescript("""
+                CREATE TABLE seen_users (user_hash TEXT PRIMARY KEY, season TEXT,
+                                         depth INTEGER, discovered_at TEXT);
+                INSERT INTO seen_users VALUES ('abc', '2026', 1, 'then');
+            """)
+            old.commit()
+            old.close()
+
+            conn = db.connect(path)
+            pk = [r[1] for r in conn.execute("PRAGMA table_info(seen_users)") if r[5]]
+            self.assertEqual(pk, ["user_hash", "season"])
+            self.assertTrue(db.user_seen(conn, "abc", "2026"))
+            self.assertFalse(db.user_seen(conn, "abc", "2025"))

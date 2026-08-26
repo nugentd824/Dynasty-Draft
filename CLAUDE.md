@@ -68,10 +68,14 @@ toward an identical average and hides real separation between them.
   usable drafts from 60. Most people's other leagues are snake, so restricting
   the walk starves the frontier within one hop. `--auction-leagues-only` still
   exists, and is worse.
-- **Roughly 7% of drafts in the graph are completed auctions** (11 of 157 near
-  the seed, in preseason). Auctions are ~15% of all drafts and about half of
-  those had not drafted yet, so the ratio should improve once the season
-  starts.
+- **Completed auctions are rare in the graph, and the cost per draft is high.**
+  A 2026 crawl from one seed exhausted its frontier at 568 users and 497
+  leagues, 1065 requests, and returned **3** usable drafts — about 355 requests
+  each. Preseason explains part of it (drafts still to come), and one seed's
+  neighbourhood is not the platform, but plan against this number rather than a
+  hopeful one. Count *unique* drafts when measuring: a draft is reported by
+  every one of its league's members, so per-encounter tallies overstate yield by
+  roughly the team count.
 
 ## Unverified — check before trusting at scale
 

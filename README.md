@@ -17,9 +17,10 @@ needed no change.
 Draft objects, league objects and `/state/nfl` have all been checked against
 live responses too, and the crawler has run against the live API end to end.
 
-Discovery yield is measured at roughly 7% of encountered drafts being completed
-auctions, at about a dozen requests per usable draft. Per-segment sample size at
-scale is still unknown.
+Discovery yield is the open problem. One 2026 crawl exhausted its frontier at
+568 users and 497 leagues for 3 usable drafts, at ~355 requests each. Reaching a
+sample worth aggregating needs either more seeds, greater depth, or a season
+whose drafts have all happened.
 
 ## Setup
 
