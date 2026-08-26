@@ -181,3 +181,14 @@ class PoolingTests(unittest.TestCase):
         where, params = aggregate._segment_where(ppr=[])
         self.assertNotIn("ppr_type", where)
         self.assertEqual(params, [])
+
+    def test_segment_listing_can_pool_reception_scoring(self):
+        split = aggregate.list_segments(self.conn)
+        pooled = aggregate.list_segments(self.conn, pool_ppr=True)
+        self.assertEqual({r["ppr_type"] for r in split}, {"half_ppr", "ppr"})
+        self.assertEqual({r["ppr_type"] for r in pooled}, {aggregate.POOLED_PPR_LABEL})
+        self.assertEqual(sum(r["n_drafts"] for r in pooled), 4)
+
+    def test_standard_scoring_is_not_pooled_in(self):
+        # Standard is a different market for anyone who catches the ball.
+        self.assertNotIn("standard", aggregate.POOLED_PPR_TYPES)

@@ -42,16 +42,35 @@ def percentile(sorted_values: list[float], q: float) -> float:
     return sorted_values[low] * (1 - frac) + sorted_values[high] * frac
 
 
-def list_segments(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+# Reception scoring, collapsed. Only half-PPR and full PPR are pooled: standard
+# scoring is a genuinely different market for anyone who catches the ball, and
+# pooling it in would not be a close call.
+POOLED_PPR_LABEL = "half_ppr+ppr"
+POOLED_PPR_TYPES = ("half_ppr", "ppr")
+
+_PPR_EXPR = (
+    f"CASE WHEN d.ppr_type IN {POOLED_PPR_TYPES} THEN '{POOLED_PPR_LABEL}' "
+    "ELSE d.ppr_type END"
+)
+
+
+def list_segments(conn: sqlite3.Connection, pool_ppr: bool = False) -> list[sqlite3.Row]:
+    """Segments and their sample sizes.
+
+    With pool_ppr, half-PPR and full PPR are reported as one row so the combined
+    sample is visible. That is a reporting choice, not a claim that they price
+    the same — `compare_dimension` is what answers that.
+    """
+    ppr_expr = _PPR_EXPR if pool_ppr else "d.ppr_type"
     return list(conn.execute(
-        """
-        SELECT d.season, d.league_format, d.superflex, d.ppr_type, d.teams,
+        f"""
+        SELECT d.season, d.league_format, d.superflex, {ppr_expr} AS ppr_type, d.teams,
                MAX(COALESCE(d.max_keepers, 0)) AS max_keepers,
                COUNT(DISTINCT d.draft_id) AS n_drafts,
                COUNT(p.pick_no)           AS n_picks
         FROM drafts d LEFT JOIN picks p ON p.draft_id = d.draft_id
         WHERE d.included = 1
-        GROUP BY d.season, d.league_format, d.superflex, d.ppr_type, d.teams
+        GROUP BY d.season, d.league_format, d.superflex, ppr_type, d.teams
         ORDER BY n_drafts DESC
         """
     ))
@@ -300,6 +319,9 @@ def keeper_distribution(conn: sqlite3.Connection) -> str:
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--segments", action="store_true", help="list segments and their sample sizes")
+    ap.add_argument("--pool-ppr", action="store_true",
+                    help=f"report {POOLED_PPR_LABEL} as one segment; also expands a bare "
+                         "--ppr half_ppr or --ppr ppr to cover both")
     ap.add_argument("--keeper-distribution", action="store_true",
                     help="keeper share per draft, for setting the threshold from data")
     ap.add_argument("--season")
@@ -322,10 +344,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     conn = db.connect(cfg.db_path)
 
     if args.segments:
+        if args.pool_ppr:
+            print(f"(reception scoring pooled: {' + '.join(POOLED_PPR_TYPES)}. "
+                  "Standard scoring stays separate.)\n")
         print(f"{'season':<8} {'format':<9} {'sf':<3} {'ppr':<10} {'teams':>5} "
               f"{'keep':>5} {'drafts':>7} {'picks':>7}")
         print("-" * 68)
-        for r in list_segments(conn):
+        for r in list_segments(conn, pool_ppr=args.pool_ppr):
             print(f"{r['season'] or '?':<8} {r['league_format'] or '?':<9} {r['superflex']:<3} "
                   f"{r['ppr_type'] or '?':<10} {str(r['teams'] or '?'):>5} "
                   f"{r['max_keepers']:>5} {r['n_drafts']:>7} {r['n_picks']:>7}")
@@ -340,6 +365,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     season = args.season or cfg.season
     ppr = args.ppr.split(",") if args.ppr else None
     teams = [int(t) for t in args.teams.split(",")] if args.teams else None
+    if args.pool_ppr and ppr and set(ppr) <= set(POOLED_PPR_TYPES):
+        ppr = list(POOLED_PPR_TYPES)
     if ppr and len(ppr) == 1:
         ppr = ppr[0]
     if teams and len(teams) == 1:
