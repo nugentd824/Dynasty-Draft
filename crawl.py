@@ -167,7 +167,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--max-drafts", type=int, default=50, help="stop after discovering this many auction drafts")
     ap.add_argument("--max-depth", type=int, default=3, help="how far out through the social graph to walk")
     ap.add_argument("--max-users", type=int, default=2000, help="hard cap on users visited")
-    ap.add_argument("--season", help="override SLEEPER_SEASON")
+    ap.add_argument("--season", help="override SLEEPER_SEASON; 'auto' asks /state/nfl")
     ap.add_argument("--expand-all-leagues", action="store_true",
                     help="follow snake leagues too (wider, much more expensive)")
     ap.add_argument("--verbose", "-v", action="store_true")
@@ -179,11 +179,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     cfg = Config.from_env()
-    if args.season:
-        cfg = Config(**{**cfg.__dict__, "season": args.season})
-
     conn = db.connect(cfg.db_path)
     client = SleeperClient(rate_limit_per_min=cfg.rate_limit_per_min)
+
+    season = args.season
+    if season == "auto":
+        state = client.get_state() or {}
+        season = str(state.get("league_season") or state.get("season") or cfg.season)
+        log.info("season %s from /state/nfl (season_type=%s, week=%s)",
+                 season, state.get("season_type"), state.get("week"))
+    if season:
+        cfg = Config(**{**cfg.__dict__, "season": season})
     crawler = Crawler(
         conn, client, cfg,
         max_drafts=args.max_drafts,

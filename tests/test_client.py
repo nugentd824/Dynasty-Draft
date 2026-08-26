@@ -153,3 +153,36 @@ class PlayerCacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateTests(unittest.TestCase):
+    """The one endpoint confirmed against a real response so far.
+
+    Captured 2026-08-26 from https://api.sleeper.app/v1/state/nfl — the first
+    live Sleeper data this project has seen. `metadata.amount` on auction picks
+    is still unconfirmed; see verify.py.
+    """
+
+    REAL_RESPONSE = {
+        "week": 3, "leg": 0, "season": "2026", "season_type": "pre",
+        "league_season": "2026", "previous_season": "2025",
+        "season_start_date": "2026-08-06", "display_week": 3,
+        "league_create_season": "2026", "season_has_scores": True,
+    }
+
+    def test_state_is_parsed(self):
+        clock = Clock()
+        c = SleeperClient(
+            session=FakeSession([FakeResponse(200, self.REAL_RESPONSE)]),
+            limiter=RateLimiter(1000, clock=clock, sleeper=clock.sleep),
+            sleeper=clock.sleep,
+        )
+        state = c.get_state()
+        self.assertEqual(state["league_season"], "2026")
+        self.assertEqual(c.session.urls[-1], "https://api.sleeper.app/v1/state/nfl")
+
+    def test_league_season_is_the_one_to_crawl(self):
+        # season and league_season can disagree around the new year; drafts are
+        # filed under league_season, so that is what the crawl follows.
+        self.assertEqual(self.REAL_RESPONSE["league_season"], "2026")
+        self.assertEqual(self.REAL_RESPONSE["previous_season"], "2025")

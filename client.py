@@ -143,6 +143,12 @@ class SleeperClient:
 
     # -- endpoints ---------------------------------------------------------
 
+    def get_state(self, sport: str = "nfl") -> Optional[dict]:
+        """Current season and week. Takes no parameters, so it doubles as a
+        reachability check — a `null` from anything else means "not found",
+        but this one always has an answer."""
+        return self.get(f"state/{sport}")
+
     def get_user(self, username_or_id: str) -> Optional[dict]:
         return self.get(f"user/{username_or_id}")
 
